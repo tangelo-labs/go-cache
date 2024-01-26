@@ -41,7 +41,7 @@ func (r redisCache[T]) Get(ctx context.Context, key string) (T, error) {
 
 	prf, err := r.encoder.Decode([]byte(rawPrf))
 	if err != nil {
-		return result, fmt.Errorf("%w: trying to decode key %s, %w", cache.ErrDecoding, key, err)
+		return result, fmt.Errorf("%w: trying to decode key %s", cache.ErrDecoding, key)
 	}
 
 	return prf, nil
@@ -50,7 +50,7 @@ func (r redisCache[T]) Get(ctx context.Context, key string) (T, error) {
 func (r redisCache[T]) Put(ctx context.Context, key string, value T) error {
 	rawPrf, err := r.encoder.Encode(value)
 	if err != nil {
-		return fmt.Errorf("%w: tyring to encode key %s with value %v", cache.ErrEncoding, key, value)
+		return fmt.Errorf("%w: tyring to encode key %s", cache.ErrEncoding, key)
 	}
 
 	if sErr := r.client.Set(ctx, r.arrangeKey(key), rawPrf, r.ttl).Err(); sErr != nil {
