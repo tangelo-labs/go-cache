@@ -131,11 +131,11 @@ func TestLRU_Parallelism(t *testing.T) {
 			values := make([]string, 0)
 			mu := sync.Mutex{}
 
-			for _, lru := range caches {
+			for ci := range caches {
 				for i := 0; i < n; i++ {
 					wg.Add(1)
 
-					go func() {
+					go func(lru cache.SimpleCache[string]) {
 						defer wg.Done()
 
 						mu.Lock()
@@ -149,7 +149,7 @@ func TestLRU_Parallelism(t *testing.T) {
 
 							return
 						}
-					}()
+					}(caches[ci])
 				}
 			}
 
