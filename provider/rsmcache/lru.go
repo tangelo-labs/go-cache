@@ -76,7 +76,7 @@ func (c *lruWrapper[T]) Get(_ context.Context, key string) (value T, err error) 
 func (c *lruWrapper[T]) Put(ctx context.Context, key string, value T) error {
 	rawPrf, err := c.encoder.Encode(value)
 	if err != nil {
-		return fmt.Errorf("%w: tyring to encode key `%s` with value `%v`, details = %s", cache.ErrEncoding, key, value, err)
+		return fmt.Errorf("%w: tyring to encode key `%s`", cache.ErrEncoding, key)
 	}
 
 	c.inner.Add(key, value)
@@ -84,15 +84,15 @@ func (c *lruWrapper[T]) Put(ctx context.Context, key string, value T) error {
 	pipe := c.client.TxPipeline()
 
 	if sErr := pipe.Set(ctx, key, rawPrf, 0).Err(); sErr != nil {
-		return fmt.Errorf("%w: trying to set key `%s` with value `%v`, details = %s", cache.ErrInvalidValue, key, value, sErr)
+		return fmt.Errorf("%w: trying to set key `%s`, details = %w", cache.ErrInvalidValue, key, sErr)
 	}
 
 	if pErr := pipe.Publish(ctx, c.channelName, key).Err(); pErr != nil {
-		return fmt.Errorf("%w: trying to publish key `%s` with value `%v`, details = %s", cache.ErrInvalidValue, key, value, pErr)
+		return fmt.Errorf("%w: trying to publish key `%s`, details = %w", cache.ErrInvalidValue, key, pErr)
 	}
 
 	if _, eErr := pipe.Exec(ctx); eErr != nil {
-		return fmt.Errorf("%w: trying to execute transaction for key `%s` with value `%v`, details = %s", cache.ErrInvalidValue, key, value, eErr)
+		return fmt.Errorf("%w: trying to execute transaction for key `%s`, details = %w", cache.ErrInvalidValue, key, eErr)
 	}
 
 	return nil
@@ -151,12 +151,12 @@ func (c *lruWrapper[T]) resolveValue(m *redis.Message) (T, error) {
 	sValue, err := c.client.Get(c.ctx, changedKey).Result()
 
 	if err != nil {
-		return result, fmt.Errorf("%w: error getting value for key `%s`, details = %s", cache.ErrDecoding, changedKey, err)
+		return result, fmt.Errorf("%w: error getting value for key `%s`, details = %w", cache.ErrDecoding, changedKey, err)
 	}
 
 	result, err = c.encoder.Decode([]byte(sValue))
 	if err != nil {
-		return result, fmt.Errorf("%w: error decoding value `%s`, details = %s", cache.ErrDecoding, sValue, err)
+		return result, fmt.Errorf("%w: error decoding value `%s`, details = %w", cache.ErrDecoding, sValue, err)
 	}
 
 	return result, nil
