@@ -98,11 +98,15 @@ func TestLRU_Concurrency(t *testing.T) {
 	})
 }
 
+// TestLRU_Parallelism this test simulates a real world scenario where multiple
+// goroutines are writing the same key with different values through different instances
+// of an application. Expected result is that the last written value is propagated to all
+// instances, and that the propagation is eventually consistent.
 func TestLRU_Parallelism(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
-	t.Run("GIVEN two rsmcache instances", func(t *testing.T) {
+	t.Run("GIVEN 10 rsmcache instances", func(t *testing.T) {
 		mini := miniredis.RunT(t)
 		opts, err := redis.ParseURL(fmt.Sprintf("redis://%s", mini.Addr()))
 		require.NoError(t, err)
@@ -110,14 +114,16 @@ func TestLRU_Parallelism(t *testing.T) {
 		encoder := cache.GobCodec[string]{}
 		cacheSize := 100
 		channelName := time.Now().String()
+		caches := make([]cache.SimpleCache[string], 10)
 
-		cacheOne, err := rsmcache.NewLRU[string](ctx, encoder, cacheSize, redis.NewClient(opts), channelName)
-		require.NoError(t, err)
+		for i := 0; i < 10; i++ {
+			c, err := rsmcache.NewLRU[string](ctx, encoder, cacheSize, redis.NewClient(opts), channelName)
+			require.NoError(t, err)
 
-		cacheTwo, err := rsmcache.NewLRU[string](ctx, encoder, cacheSize, redis.NewClient(opts), channelName)
-		require.NoError(t, err)
+			caches[i] = c
+		}
 
-		t.Run("WHEN multiple goroutines writes the same key with different values", func(t *testing.T) {
+		t.Run("WHEN multiple goroutines writes the same key with different values through different caches", func(t *testing.T) {
 			key := gofakeit.UUID()
 			n := 100
 			wg := sync.WaitGroup{}
@@ -125,37 +131,42 @@ func TestLRU_Parallelism(t *testing.T) {
 			values := make([]string, 0)
 			mu := sync.Mutex{}
 
-			for i := 0; i < n; i++ {
-				wg.Add(1)
+			for _, lru := range caches {
+				for i := 0; i < n; i++ {
+					wg.Add(1)
 
-				go func() {
-					defer wg.Done()
+					go func() {
+						defer wg.Done()
 
-					mu.Lock()
-					defer mu.Unlock()
+						mu.Lock()
+						defer mu.Unlock()
 
-					v := gofakeit.UUID()
-					values = append(values, v)
+						v := gofakeit.UUID()
+						values = append(values, v)
 
-					if pErr := cacheOne.Put(ctx, key, v); pErr != nil {
-						t.Errorf("error putting key `%s` with value `%s`", key, v)
+						if pErr := lru.Put(ctx, key, v); pErr != nil {
+							t.Errorf("error putting key `%s` with value `%s`", key, v)
 
-						return
-					}
-				}()
+							return
+						}
+					}()
+				}
 			}
 
 			wg.Wait()
 
-			t.Run("THEN value written by the last goroutine is propagated to the second cache", func(t *testing.T) {
+			t.Run("THEN the last written value is propagated to all caches", func(t *testing.T) {
 				// give time redis to propagate the last value
-				time.Sleep(time.Second)
+				time.Sleep(2 * time.Second)
 
-				lastValue := values[len(values)-1]
-				v, gErr := cacheTwo.Get(ctx, key)
+				lastWrittenValue := values[len(values)-1]
 
-				require.NoError(t, gErr)
-				require.EqualValues(t, lastValue, v)
+				for _, lru := range caches {
+					v, gErr := lru.Get(ctx, key)
+
+					require.NoError(t, gErr)
+					require.EqualValues(t, lastWrittenValue, v)
+				}
 			})
 		})
 	})
