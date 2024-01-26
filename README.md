@@ -9,7 +9,6 @@ some implementations.
 go get github.com/tangelo-labs/go-cache
 ```
 
-
 ## Usage
 
 ```go
@@ -22,12 +21,12 @@ import (
 )
 
 func main() {
-	cache, err := mcache.NewLRU[int](100)
-	if err != nil {
+    cache, err := mcache.NewLRU[int](100)
+    if err != nil {
         panic(err)
     }
-	
-	if err := cache.Put(context.TODO(), "key", 27); err != nil {
+    
+    if err := cache.Put(context.TODO(), "test", 27); err != nil {
         panic(err)
     }
 }
