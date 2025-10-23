@@ -243,8 +243,6 @@ func (c *lruWrapper[T]) resolveValue(sValue []byte) (T, error) {
 }
 
 func (c *lruWrapper[T]) resolveEnvelope(m *redis.Message) (*envelope, error) {
-	env := &envelope{}
-
 	env, err := c.envelopeEncoder.Decode([]byte(m.Payload))
 	if err != nil {
 		return env, fmt.Errorf("%w: error decoding envelope `%s`, details = %w", cache.ErrDecoding, m.Payload, err)
