@@ -154,7 +154,7 @@ func TestLRU_Concurrency(t *testing.T) {
 
 			require.NoError(t, cacheOne.Flush(ctx))
 
-			t.Run("THEN then all keys are deleted from all caches", func(t *testing.T) {
+			t.Run("THEN all keys are deleted from all caches", func(t *testing.T) {
 				require.Eventually(t, func() bool {
 					exists1, gErr := cacheOne.Has(ctx, key)
 					if gErr != nil {
