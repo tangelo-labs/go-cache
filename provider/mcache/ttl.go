@@ -72,7 +72,11 @@ func (t *ttlWrapper[T]) Remove(_ context.Context, key string) (bool, error) {
 		return false, err
 	}
 
-	return exists, t.inner.Remove(key)
+	if err := t.inner.Remove(key); err != nil {
+		return false, err
+	}
+
+	return exists, nil
 }
 
 func (t *ttlWrapper[T]) Flush(_ context.Context) error {
