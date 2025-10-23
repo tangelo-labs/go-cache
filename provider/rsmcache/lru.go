@@ -3,10 +3,16 @@ package rsmcache
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/redis/go-redis/v9"
 	"github.com/tangelo-labs/go-cache"
+)
+
+const (
+	removeCmdPrefix = "::REMOVE::"
+	flushCmd        = "::FLUSH::"
 )
 
 type lruWrapper[T any] struct {
@@ -31,6 +37,9 @@ type lruWrapper[T any] struct {
 //
 // When the same key is written by multiple instances at the same time (parallel
 // writes), the last write wins.
+//
+// Except for Get & Has operations, all other ones are handled on reaction to
+// the channel subscription.
 func NewLRU[T any](
 	ctx context.Context,
 	encoder cache.Codec[T],
@@ -79,8 +88,6 @@ func (c *lruWrapper[T]) Put(ctx context.Context, key string, value T) error {
 		return fmt.Errorf("%w: tyring to encode key `%s`", cache.ErrEncoding, key)
 	}
 
-	c.inner.Add(key, value)
-
 	pipe := c.client.TxPipeline()
 
 	if sErr := pipe.Set(ctx, key, rawPrf, 0).Err(); sErr != nil {
@@ -102,12 +109,70 @@ func (c *lruWrapper[T]) Has(_ context.Context, key string) (bool, error) {
 	return c.inner.Contains(key), nil
 }
 
-func (c *lruWrapper[T]) Remove(_ context.Context, key string) (bool, error) {
-	return c.inner.Remove(key), nil
+func (c *lruWrapper[T]) Remove(ctx context.Context, key string) (bool, error) {
+	pipe := c.client.TxPipeline()
+
+	removeKey := fmt.Sprintf("%s%s", removeCmdPrefix, key)
+
+	var errPipe error
+	defer func() {
+		if errPipe != nil {
+			c.inner.Remove(key)
+		}
+	}()
+
+	exists := c.inner.Contains(key)
+
+	if sErr := pipe.Set(ctx, removeKey, "", 0).Err(); sErr != nil {
+		errPipe = sErr
+
+		return false, fmt.Errorf("%w: trying to set remove key `%s`, details = %w", cache.ErrInvalidValue, key, sErr)
+	}
+
+	if pErr := pipe.Publish(ctx, c.channelName, removeKey).Err(); pErr != nil {
+		errPipe = pErr
+
+		return false, fmt.Errorf("%w: trying to publish remove key `%s`, details = %w", cache.ErrInvalidValue, key, pErr)
+	}
+
+	if _, eErr := pipe.Exec(ctx); eErr != nil {
+		errPipe = eErr
+
+		return false, fmt.Errorf("%w: trying to execute transaction for removing key `%s`, details = %w", cache.ErrInvalidValue, key, eErr)
+	}
+
+	return exists, nil
 }
 
-func (c *lruWrapper[T]) Flush(_ context.Context) error {
-	c.inner.Purge()
+func (c *lruWrapper[T]) Flush(ctx context.Context) error {
+	pipe := c.client.TxPipeline()
+
+	key := flushCmd
+
+	var errPipe error
+	defer func() {
+		if errPipe != nil {
+			c.inner.Purge()
+		}
+	}()
+
+	if sErr := pipe.Set(ctx, key, "", 0).Err(); sErr != nil {
+		errPipe = sErr
+
+		return fmt.Errorf("%w: trying to set key `%s`, details = %w", cache.ErrInvalidValue, key, sErr)
+	}
+
+	if pErr := pipe.Publish(ctx, c.channelName, key).Err(); pErr != nil {
+		errPipe = pErr
+
+		return fmt.Errorf("%w: trying to publish key `%s`, details = %w", cache.ErrInvalidValue, key, pErr)
+	}
+
+	if _, eErr := pipe.Exec(ctx); eErr != nil {
+		errPipe = eErr
+
+		return fmt.Errorf("%w: trying to execute transaction for key `%s`, details = %w", cache.ErrInvalidValue, key, eErr)
+	}
 
 	return nil
 }
@@ -129,6 +194,18 @@ func (c *lruWrapper[T]) run() {
 
 			return
 		case m := <-changes:
+			switch {
+			case strings.HasPrefix(m.Payload, removeCmdPrefix):
+				key := strings.TrimPrefix(m.Payload, removeCmdPrefix)
+				c.inner.Remove(key)
+
+				continue
+			case m.Payload == flushCmd:
+				c.inner.Purge()
+
+				continue
+			}
+
 			value, err := c.resolveValue(m)
 			if err != nil {
 				fmt.Printf("error decoding payload: %s\n", err)

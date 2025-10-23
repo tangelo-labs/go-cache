@@ -1,6 +1,6 @@
 module github.com/tangelo-labs/go-cache
 
-go 1.20
+go 1.21
 
 // Deps
 require (

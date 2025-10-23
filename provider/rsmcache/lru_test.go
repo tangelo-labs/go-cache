@@ -86,12 +86,87 @@ func TestLRU_Concurrency(t *testing.T) {
 
 			t.Run("THEN the last written value is eventually propagated to the second cache", func(t *testing.T) {
 				require.Eventually(t, func() bool {
-					v, gErr := cacheTwo.Get(ctx, key)
+					v1, gErr := cacheOne.Get(ctx, key)
 					if gErr != nil {
 						return false
 					}
 
-					return v == value
+					v2, gErr := cacheTwo.Get(ctx, key)
+					if gErr != nil {
+						return false
+					}
+
+					return v1 == value && v2 == value
+				}, 5*time.Second, 100*time.Millisecond)
+			})
+		})
+
+		t.Run("WHEN removing a key from one cache", func(t *testing.T) {
+			key := gofakeit.UUID()
+			value := gofakeit.UUID()
+
+			require.NoError(t, cacheOne.Put(ctx, key, value))
+
+			require.Eventually(t, func() bool {
+				exists, errH := cacheOne.Has(ctx, key)
+				if errH != nil {
+					return false
+				}
+
+				return exists
+			}, 5*time.Second, 100*time.Millisecond)
+
+			deleted, err := cacheOne.Remove(ctx, key)
+			require.NoError(t, err)
+			require.True(t, deleted)
+
+			t.Run("THEN it is deleted at the other caches", func(t *testing.T) {
+				require.Eventually(t, func() bool {
+					exists1, gErr := cacheOne.Has(ctx, key)
+					if gErr != nil {
+						return false
+					}
+
+					exists2, gErr := cacheTwo.Has(ctx, key)
+					if gErr != nil {
+						return false
+					}
+
+					return !exists1 && !exists2
+				}, 5*time.Second, 100*time.Millisecond)
+			})
+		})
+
+		t.Run("WHEN flushing one cache", func(t *testing.T) {
+			key := gofakeit.UUID()
+			value := gofakeit.UUID()
+
+			require.NoError(t, cacheOne.Put(ctx, key, value))
+
+			require.Eventually(t, func() bool {
+				exists, errH := cacheOne.Has(ctx, key)
+				if errH != nil {
+					return false
+				}
+
+				return exists
+			}, 5*time.Second, 100*time.Millisecond)
+
+			require.NoError(t, cacheOne.Flush(ctx))
+
+			t.Run("THEN then all keys are deleted from all caches", func(t *testing.T) {
+				require.Eventually(t, func() bool {
+					exists1, gErr := cacheOne.Has(ctx, key)
+					if gErr != nil {
+						return false
+					}
+
+					exists2, gErr := cacheTwo.Has(ctx, key)
+					if gErr != nil {
+						return false
+					}
+
+					return !exists1 && !exists2
 				}, 5*time.Second, 100*time.Millisecond)
 			})
 		})
