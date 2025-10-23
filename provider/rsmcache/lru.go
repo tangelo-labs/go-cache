@@ -155,6 +155,7 @@ func (c *lruWrapper[T]) Flush(ctx context.Context) error {
 	pipe := c.client.TxPipeline()
 
 	key := flushCmd
+
 	c.inner.Purge()
 
 	msgRaw, err := c.envelopeEncoder.Encode(&envelope{
@@ -232,8 +233,6 @@ func (c *lruWrapper[T]) run() {
 // key that was changed. Then it tries to get the value for that key and decode
 // it using the encoder.
 func (c *lruWrapper[T]) resolveValue(sValue []byte) (T, error) {
-	var result T
-
 	result, err := c.encoder.Decode(sValue)
 	if err != nil {
 		return result, fmt.Errorf("%w: error decoding value `%s`, details = %w", cache.ErrDecoding, sValue, err)
